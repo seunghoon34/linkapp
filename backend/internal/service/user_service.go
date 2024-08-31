@@ -16,10 +16,17 @@ func NewUserService(repo *repository.UserRepository) *UserService {
 	return &UserService{repo: repo}
 }
 
-func (s *UserService) CreateUser(username, email, password string) error {
+func (s *UserService) CreateUser(username, email, password string) (*model.User, error) {
+	// Check if user already exists
+	existingUser, _ := s.repo.GetByEmail(email)
+	if existingUser != nil {
+		return nil, errors.New("user with this email already exists")
+	}
+
+	// Hash the password
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	user := &model.User{
@@ -27,10 +34,16 @@ func (s *UserService) CreateUser(username, email, password string) error {
 		Email:    email,
 		Password: string(hashedPassword),
 	}
-	return s.repo.Create(user)
+
+	err = s.repo.Create(user)
+	if err != nil {
+		return nil, err
+	}
+
+	return user, nil
 }
 
-func (s *UserService) GetUserByID(id int) (*model.User, error) {
+func (s *UserService) GetUserByID(id string) (*model.User, error) {
 	return s.repo.GetByID(id)
 }
 
@@ -38,7 +51,7 @@ func (s *UserService) GetUserByEmail(email string) (*model.User, error) {
 	return s.repo.GetByEmail(email)
 }
 
-func (s *UserService) UpdateUser(id int, username, email string) error {
+func (s *UserService) UpdateUser(id string, username, email string) error {
 	user, err := s.repo.GetByID(id)
 	if err != nil {
 		return err
@@ -48,22 +61,6 @@ func (s *UserService) UpdateUser(id int, username, email string) error {
 	user.Email = email
 
 	return s.repo.Update(user)
-}
-
-func (s *UserService) DeleteUser(id int) error {
-	return s.repo.Delete(id)
-}
-
-func (s *UserService) ListUsers(page, pageSize int) ([]*model.User, error) {
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 {
-		pageSize = 10
-	}
-
-	offset := (page - 1) * pageSize
-	return s.repo.List(pageSize, offset)
 }
 
 func (s *UserService) AuthenticateUser(email, password string) (*model.User, error) {
@@ -78,24 +75,4 @@ func (s *UserService) AuthenticateUser(email, password string) (*model.User, err
 	}
 
 	return user, nil
-}
-
-func (s *UserService) ChangePassword(id int, oldPassword, newPassword string) error {
-	user, err := s.repo.GetByID(id)
-	if err != nil {
-		return err
-	}
-
-	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(oldPassword))
-	if err != nil {
-		return errors.New("invalid old password")
-	}
-
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
-	if err != nil {
-		return err
-	}
-
-	user.Password = string(hashedPassword)
-	return s.repo.Update(user)
 }

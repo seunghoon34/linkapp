@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -14,9 +15,43 @@ import (
 	"github.com/seunghoon34/linkapp/backend/internal/handler"
 	"github.com/seunghoon34/linkapp/backend/internal/repository"
 	"github.com/seunghoon34/linkapp/backend/internal/service"
+
+	"github.com/joho/godotenv"
 )
 
+func loadEnv() {
+	currentDir, err := os.Getwd()
+	if err != nil {
+		log.Println("Error getting current directory:", err)
+		return
+	}
+
+	// Move up two levels to reach the backend directory
+	backendDir := filepath.Dir(filepath.Dir(currentDir))
+	envPath := filepath.Join(backendDir, ".env")
+
+	err = godotenv.Load(envPath)
+	if err != nil {
+		log.Println("Error loading .env file:", err)
+	}
+}
+
+func runLinkExpirationTask(userService *service.UserService) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			if err := userService.ExpireLinks(); err != nil {
+				log.Printf("Error expiring links: %v", err)
+			}
+		}
+	}
+}
+
 func main() {
+	loadEnv()
 	// Load environment variables
 	mongoURI := os.Getenv("MONGO_URI")
 	if mongoURI == "" {
@@ -47,13 +82,19 @@ func main() {
 
 	// Initialize database and collections
 	database := client.Database("dating_app")
-	userCollection := database.Collection("users")
+	// Remove the following line:
+	// userCollection := database.Collection("users")
 
 	// Initialize repositories
-	userRepo := repository.NewUserRepository(userCollection)
+	userRepo := repository.NewUserRepository(database)
+	linkRepo := repository.NewLinkRepository(database)
+	chatroomRepo := repository.NewChatroomRepository(database)
 
 	// Initialize services
-	userService := service.NewUserService(userRepo)
+	userService := service.NewUserService(userRepo, linkRepo, chatroomRepo)
+
+	// Start link expiration goroutine
+	go runLinkExpirationTask(userService)
 
 	// Initialize handlers
 	userHandler := handler.NewUserHandler(userService)
@@ -66,6 +107,16 @@ func main() {
 	r.HandleFunc("/users/{id}", userHandler.GetUser).Methods("GET")
 	r.HandleFunc("/users/{id}", userHandler.UpdateUser).Methods("PUT")
 	r.HandleFunc("/login", userHandler.Login).Methods("POST")
+	r.HandleFunc("/users/{id}/matches", userHandler.SearchMatches).Methods("GET")
+	r.HandleFunc("/users/{id}/location", userHandler.UpdateLocation).Methods("PUT")
+	r.HandleFunc("/users/{id}/start-searching", userHandler.StartSearching).Methods("POST")
+	r.HandleFunc("/users/{id}/stop-searching", userHandler.StopSearching).Methods("POST")
+	r.HandleFunc("/users/{id}/find-match", userHandler.FindMatch).Methods("GET")
+	r.HandleFunc("/users/{userId}/links/{linkId}/respond", userHandler.RespondToLink).Methods("POST")
+	r.HandleFunc("/users/{userId}/chatrooms/{chatroomId}/messages", userHandler.SendMessage).Methods("POST")
+	r.HandleFunc("/users/{userId}/chatrooms/{chatroomId}/messages", userHandler.GetMessages).Methods("GET")
+	r.HandleFunc("/chatrooms/{chatroomId}/unlock", userHandler.UnlockChatroom).Methods("POST")
+	r.HandleFunc("/users/{userId}/chatrooms/{chatroomId}/nfc-unlock", userHandler.VerifyNFCAndUnlockChatroom).Methods("POST")
 
 	// Add middleware
 	r.Use(loggingMiddleware)

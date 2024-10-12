@@ -25,10 +25,14 @@ func loadEnv() {
 		log.Println("Error getting current directory:", err)
 		return
 	}
+	log.Println("Current directory:", currentDir)
 
-	// Move up two levels to reach the backend directory
-	backendDir := filepath.Dir(filepath.Dir(currentDir))
+	// The .env file is in the current directory (backend)
+	backendDir := currentDir
+	log.Println("Backend directory:", backendDir)
+
 	envPath := filepath.Join(backendDir, ".env")
+	log.Println("Env file path:", envPath)
 
 	err = godotenv.Load(envPath)
 	if err != nil {
